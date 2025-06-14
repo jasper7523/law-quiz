@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>國考爭點練習器</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #007bff;
+            --primary-hover: #0056b3;
+            --correct-bg: #d4edda;
+            --correct-text: #155724;
+            --wrong-bg: #f8d7da;
+            --wrong-text: #721c24;
+            --missed-bg: #fff3cd;
+            --missed-text: #856404;
+            --light-gray: #f4f4f9;
+            --medium-gray: #ddd;
+            --dark-gray: #333;
+        }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; line-height: 1.6; margin: 0; padding: 15px; background-color: var(--light-gray); color: var(--dark-gray); }
+        .container { max-width: 800px; margin: auto; background: #fff; padding: 20px; border-radius: 10px; box-shadow: 0 0 20px rgba(0,0,0,0.05); }
+        h1, h2, h3 { color: #444; }
+        h1 { text-align: center; }
+        .question-area, .feedback-area { margin-top: 15px; padding: 15px; border: 1px solid var(--medium-gray); border-radius: 5px; background-color: #fafafa; }
+        .choices div { margin: 10px 0; }
+        .choices label { display: block; padding: 12px; border: 1px solid #ccc; border-radius: 8px; cursor: pointer; transition: all 0.2s ease-in-out; user-select: none; }
+        .choices label:hover { background-color: #f0f0f0; }
+        .choices input[type="checkbox"] { display: none; }
+        .choices input[type="checkbox"]:checked + span { color: var(--primary-color); font-weight: bold; }
+        .choices input[type="checkbox"]:checked + span::before { content: '✓ '; font-family: sans-serif; }
+        .choices label.checked { border-color: var(--primary-color); background-color: #e7f3ff; }
+        button { display: block; width: 100%; padding: 15px; font-size: 16px; font-weight: bold; color: #fff; background-color: var(--primary-color); border: none; border-radius: 8px; cursor: pointer; margin-top: 20px; transition: background-color 0.2s; -webkit-appearance: none; }
+        button:hover { background-color: var(--primary-hover); }
+        #loading-message { font-size: 18px; text-align: center; padding: 40px; color: #666; }
+        .feedback-item { margin: 8px 0; padding: 10px; border-radius: 5px; }
+        .feedback-correct { color: var(--correct-text); background-color: var(--correct-bg); }
+        .feedback-wrong { color: var(--wrong-text); background-color: var(--wrong-bg); }
+        .feedback-missed { color: var(--missed-text); background-color: var(--missed-bg); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>國考爭點練習器</h1>
+        <div id="loading-message">🔄 正在從您的Google雲端硬碟讀取題庫...</div>
+        <div id="quiz-area" style="display: none;">
+            <div class="question-area">
+                <h3 id="question-title"></h3>
+                <p id="question-scenario" style="white-space: pre-wrap;"></p>
+            </div>
+
+            <div class="quiz-section">
+                <h2>問題一：考點</h2>
+                <div id="choices-考點" class="choices"></div>
+            </div>
+
+            <div class="quiz-section">
+                <h2>問題二：關鍵字</h2>
+                <div id="choices-關鍵字" class="choices"></div>
+            </div>
+
+            <button id="submit-btn">送出答案</button>
+
+            <div id="feedback-area" class="feedback-area" style="display: none;"></div>
+            
+            <button id="next-btn" style="display: none; background-color: #28a745;">下一題</button>
+        </div>
+    </div>
+
+    <script>
+        // ▼▼▼ 請將下方 "" 中的內容替換成您在第一步中「發佈到網路」所取得的 .csv 連結 ▼▼▼
+        const sheetUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSt819mIxMjqR3L57o5RlmmXPuk99UOT_o3rBxVNFn9ecQUGavKRZRqnEfumK4hPA7CW9wi-kB_bMub/pub?gid=1432079927&single=true&output=csv";
+        // ▲▲▲ 請將上方 "" 中的內容替換成您在第一步中「發佈到網路」所取得的 .csv 連結 ▲▲▲
+
+        let allData = [];
+        let questionPool = [];
+        let currentQuestion = {};
+        let correct考點Indices = [];
+        let correct關鍵字Indices = [];
+
+        const loadingMessage = document.getElementById('loading-message');
+        const quizArea = document.getElementById('quiz-area');
+        const questionTitle = document.getElementById('question-title');
+        const questionScenario = document.getElementById('question-scenario');
+        const choices考點 = document.getElementById('choices-考點');
+        const choices關鍵字 = document.getElementById('choices-關鍵字');
+        const submitBtn = document.getElementById('submit-btn');
+        const nextBtn = document.getElementById('next-btn');
+        const feedbackArea = document.getElementById('feedback-area');
+
+        function parseAnswer(answerStr) {
+            if (typeof answerStr !== 'string') return {考點: [], 關鍵字: []};
+            const 考點Match = answerStr.match(/【考點】\s*([\s\S]*?)(?=\n\n【關鍵字】|$)/);
+            const 關鍵字Match = answerStr.match(/【關鍵字】\s*([\s\S]*)/);
+            const 考點Text = 考點Match ? 考點Match[1].trim() : "";
+            const 關鍵字Text = 關鍵字Match ? 關鍵字Match[1].trim() : "";
+            const 考點List = 考點Text ? [...new Set(考點Text.split(/[、\s\n/()]+/).filter(item => item && item.trim()))] : [];
+            const 關鍵字List = 關鍵字Text ? [...new Set(關鍵字Text.split(/[、\s\n/()]+/).filter(item => item && item.trim()))] : [];
+            return { 考點: 考點List, 關鍵字: 關鍵字List };
+        }
+        
+        function generateChoices(correctItems, pool, numChoices = 5) {
+            const numCorrect = Math.max(1, Math.min(correctItems.length, random.randint(2, 3)));
+            const selectedCorrect = [...correctItems].sort(() => 0.5 - Math.random()).slice(0, numCorrect);
+            const numDistractors = numChoices - selectedCorrect.length;
+            const distractorsPool = pool.filter(item => !correctItems.includes(item));
+            const selectedDistractors = [...distractorsPool].sort(() => 0.5 - Math.random()).slice(0, numDistractors);
+            const choices = [...selectedCorrect, ...selectedDistractors].sort(() => 0.5 - Math.random());
+            const correctIndices = choices.map((choice, i) => correctItems.includes(choice) ? i : -1).filter(i => i !== -1);
+            return { choices, correctIndices };
+        }
+
+        function displayQuestion() {
+            if (questionPool.length === 0) {
+                quizArea.innerHTML = '<h1>🎉 恭喜！所有題目都練習完畢了！</h1><p style="text-align:center;">您可以重新整理頁面來進行新一輪的練習。</p>';
+                quizArea.style.display = 'block';
+                return;
+            }
+            const qIndex = questionPool.pop();
+            currentQuestion = allData[qIndex];
+            
+            const parsed = parseAnswer(currentQuestion.answer);
+            const all考點 = [...new Set(allData.flatMap(q => parseAnswer(q.answer).考點))];
+            const all關鍵字 = [...new Set(allData.flatMap(q => parseAnswer(q.answer).關鍵字))];
+
+            const 考點Data = generateChoices(parsed.考點, all考點);
+            const 關鍵字Data = generateChoices(parsed.關鍵字, all關鍵字);
+
+            correct考點Indices = 考點Data.correctIndices;
+            correct關鍵字Indices = 關鍵字Data.correctIndices;
+
+            questionTitle.innerText = currentQuestion.title;
+            questionScenario.innerText = currentQuestion.scenario;
+            
+            choices考點.innerHTML = 考點Data.choices.map((c, i) => `<div><label><input type="checkbox" name="考點" value="${i}"> <span>${c}</span></label></div>`).join('');
+            choices關鍵字.innerHTML = 關鍵字Data.choices.map((c, i) => `<div><label><input type="checkbox" name="關鍵字" value="${i}"> <span>${c}</span></label></div>`).join('');
+            
+            document.querySelectorAll('.choices input').forEach(el => {
+                el.addEventListener('change', (e) => {
+                    e.target.parentElement.classList.toggle('checked', e.target.checked);
+                });
+            });
+
+            feedbackArea.style.display = 'none';
+            feedbackArea.innerHTML = '';
+            submitBtn.style.display = 'block';
+            nextBtn.style.display = 'none';
+            quizArea.style.display = 'block';
+        }
+
+        submitBtn.addEventListener('click', () => {
+            const user考點 = [...document.querySelectorAll('input[name="考點"]:checked')].map(el => parseInt(el.value));
+            const user關鍵字 = [...document.querySelectorAll('input[name="關鍵字"]:checked')].map(el => parseInt(el.value));
+            
+            let feedbackHTML = '<h3>結果分析</h3>';
+            feedbackHTML += grade(user考點, correct考點Indices, document.querySelectorAll('#choices-考點 span'), '考點');
+            feedbackHTML += grade(user關鍵字, correct關鍵字Indices, document.querySelectorAll('#choices-關鍵字 span'), '關鍵字');
+
+            feedbackArea.innerHTML = feedbackHTML;
+            feedbackArea.style.display = 'block';
+            submitBtn.style.display = 'none';
+            nextBtn.style.display = 'block';
+        });
+
+        function grade(userIndices, correctIndices, choiceElements, type) {
+            let html = `<h4>${type}部分：</h4>`;
+            const userSet = new Set(userIndices);
+            const correctSet = new Set(correctIndices);
+            if (userSet.size === correctSet.size && [...userSet].every(val => correctSet.has(val))) {
+                html += '<p class="feedback-item feedback-correct">✅ 完全正確！</p>';
+            } else {
+                const correctlyChosen = [...userSet].filter(i => correctSet.has(i));
+                const incorrectlyChosen = [...userSet].filter(i => !correctSet.has(i));
+                const missed = [...correctSet].filter(i => !userSet.has(i));
+
+                if (correctlyChosen.length > 0) html += `<p class="feedback-item feedback-correct">答對部分: ${correctlyChosen.map(i => choiceElements[i].innerText).join(', ')}</p>`;
+                if (incorrectlyChosen.length > 0) html += `<p class="feedback-item feedback-wrong">答錯部分: ${incorrectlyChosen.map(i => choiceElements[i].innerText).join(', ')}</p>`;
+                if (missed.length > 0) html += `<p class="feedback-item feedback-missed">遺漏部分: ${missed.map(i => choiceElements[i].innerText).join(', ')}</p>`;
+            }
+            return html;
+        }
+        
+        // 輔助函數: 產生隨機整數
+        Math.randint = function(min, max) {
+            return Math.floor(Math.random() * (max - min + 1)) + min;
+        };
+
+        nextBtn.addEventListener('click', displayQuestion);
+
+        // --- 主程式執行 ---
+        if (!sheetUrl) {
+            loadingMessage.innerText = '❌ 錯誤：請在程式碼中填入您的Google Sheet .csv 連結！';
+        } else {
+            Papa.parse(sheetUrl, {
+                download: true,
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    allData = results.data.filter(row => row.id && row.id.trim() !== '');
+                    if (allData.length > 0) {
+                        loadingMessage.style.display = 'none';
+                        questionPool = [...Array(allData.length).keys()].sort(() => 0.5 - Math.random());
+                        displayQuestion();
+                    } else {
+                         loadingMessage.innerText = '❌ 錯誤：讀取到的題庫是空的或格式不符。請檢查您的Google Sheet是否有內容，且欄位標題是否為 id, title, scenario, answer。';
+                    }
+                },
+                error: function(err) {
+                    loadingMessage.innerText = '❌ 讀取題庫失敗！請檢查您的連結是否正確，以及發佈設定。';
+                    console.error(err);
+                }
+            });
+        }
+    </script>
+</body>
+</html>
