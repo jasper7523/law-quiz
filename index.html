@@ -69,9 +69,9 @@
     </div>
 
     <script>
-        // ▼▼▼ 請將下方 "" 中的內容替換成您在第一步中「發佈到網路」所取得的 .csv 連結 ▼▼▼
+        // ▼▼▼ 請確認此處為您「發佈到網路」所取得的 .csv 連結 ▼▼▼
         const sheetUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSt819mIxMjqR3L57o5RlmmXPuk99UOT_o3rBxVNFn9ecQUGavKRZRqnEfumK4hPA7CW9wi-kB_bMub/pub?gid=1432079927&single=true&output=csv";
-        // ▲▲▲ 請將上方 "" 中的內容替換成您在第一步中「發佈到網路」所取得的 .csv 連結 ▲▲▲
+        // ▲▲▲ 請確認此處為您「發佈到網路」所取得的 .csv 連結 ▲▲▲
 
         let allData = [];
         let questionPool = [];
@@ -89,6 +89,11 @@
         const nextBtn = document.getElementById('next-btn');
         const feedbackArea = document.getElementById('feedback-area');
 
+        // 輔助函數: 產生隨機整數
+        function randint(min, max) {
+            return Math.floor(Math.random() * (max - min + 1)) + min;
+        }
+
         function parseAnswer(answerStr) {
             if (typeof answerStr !== 'string') return {考點: [], 關鍵字: []};
             const 考點Match = answerStr.match(/【考點】\s*([\s\S]*?)(?=\n\n【關鍵字】|$)/);
@@ -101,7 +106,8 @@
         }
         
         function generateChoices(correctItems, pool, numChoices = 5) {
-            const numCorrect = Math.max(1, Math.min(correctItems.length, random.randint(2, 3)));
+            // *** 這裡是修正後的程式碼 ***
+            const numCorrect = Math.max(1, Math.min(correctItems.length, randint(2, 3)));
             const selectedCorrect = [...correctItems].sort(() => 0.5 - Math.random()).slice(0, numCorrect);
             const numDistractors = numChoices - selectedCorrect.length;
             const distractorsPool = pool.filter(item => !correctItems.includes(item));
@@ -180,11 +186,6 @@
             }
             return html;
         }
-        
-        // 輔助函數: 產生隨機整數
-        Math.randint = function(min, max) {
-            return Math.floor(Math.random() * (max - min + 1)) + min;
-        };
 
         nextBtn.addEventListener('click', displayQuestion);
 
