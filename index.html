@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>憲法行政法國考爭點練習器</title>
+    <title>國考爭點練習器</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <style>
         :root {
@@ -32,7 +32,8 @@
         .feedback-item { margin: 8px 0; padding: 10px; border-radius: 5px; }
         .feedback-correct { color: var(--correct-text); background-color: var(--correct-bg); }
         .feedback-wrong { color: var(--wrong-text); background-color: var(--wrong-bg); }
-        .feedback-missed { color: var(--missed-text); background-color: var--missed-bg); }
+        .feedback-missed { color: var(--missed-text); background-color: var(--missed-bg); }
+        .log-status { font-size: 0.9em; text-align: right; color: #888; margin-top: 5px; height: 1.2em; }
     </style>
 </head>
 <body>
@@ -64,7 +65,7 @@
         const sheetUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSt819mIxMjqR3L57o5RlmmXPuk99UOT_o3rBxVNFn9ecQUGavKRZRqnEfumK4hPA7CW9wi-kB_bMub/pub?gid=1432079927&single=true&output=csv";
         
         // ▼▼▼ 2. 請填入您在第二步中取得的「Apps Script 網頁應用程式網址」 ▼▼▼
-        const errorLogApiUrl = "https://script.google.com/macros/s/AKfycbw3HmZD0_-z_XqUfEyghowgujtvPIZKuVEYW4G-xra0Jo5MWnysIzCMLTfXsM-z25Nx8g/exec";
+        const errorLogApiUrl = "";
         
         let allData = [], questionPool = [], currentQuestion = {};
         let correct考點Indices = [], correct關鍵字Indices = [];
@@ -142,7 +143,6 @@
         }
 
         submitBtn.addEventListener('click', () => {
-            // 鎖定所有選項
             document.querySelectorAll('.choices input[type="checkbox"]').forEach(checkbox => {
                 checkbox.disabled = true;
                 checkbox.parentElement.classList.add('disabled');
@@ -160,18 +160,28 @@
             submitBtn.style.display = 'none';
             nextBtn.style.display = 'block';
         });
-        
-        function logError(logData) {
-            if (!errorLogApiUrl) return; // 如果未設定API網址，則不執行
-            fetch(errorLogApiUrl, {
-                method: 'POST',
-                mode: 'no-cors', // 使用 no-cors 模式，因為 Apps Script 的簡單部署通常不處理 CORS 預檢請求
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(logData)
-            }).catch(err => console.error("Error logging failed:", err));
+
+        async function logError(logData) {
+            if (!errorLogApiUrl) {
+                return { success: false, message: 'API URL 未設定' };
+            }
+            try {
+                const response = await fetch(errorLogApiUrl, {
+                    method: 'POST',
+                    mode: 'cors',
+                    cache: 'no-cache',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify(logData),
+                    redirect: 'follow'
+                });
+                const result = await response.json();
+                return { success: result.result === 'success', message: result.message };
+            } catch (err) {
+                return { success: false, message: err.toString() };
+            }
         }
 
-        function grade(userIndices, correctIndices, choiceElements, type) {
+        async function grade(userIndices, correctIndices, choiceElements, type) {
             let html = `<h4>${type}部分：</h4>`;
             const userSet = new Set(userIndices);
             const correctSet = new Set(correctIndices);
@@ -191,11 +201,23 @@
                     timestamp: new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }),
                     questionTitle: currentQuestion.title,
                     questionType: type,
-                    myAnswer: [...userSet].map(i => choiceElements[i].innerText).join(', '),
-                    correctAnswer: [...correctSet].map(i => choiceElements[i].innerText).join(', '),
-                    missedAnswer: missed.map(i => choiceElements[i].innerText).join(', ')
+                    myAnswer: [...userSet].map(i => choiceElements[i].innerText).join('; '),
+                    correctAnswer: [...correctSet].map(i => choiceElements[i].innerText).join('; '),
+                    missedAnswer: missed.map(i => choiceElements[i].innerText).join('; ')
                 };
-                logError(logData);
+                
+                const logStatusDiv = document.createElement('div');
+                logStatusDiv.className = 'log-status';
+                logStatusDiv.innerText = '正在記錄錯題...';
+                html += logStatusDiv.outerHTML;
+
+                // 非同步記錄錯誤
+                logError(logData).then(result => {
+                    const statusDiv = feedbackArea.querySelector('.log-status');
+                    if (statusDiv) {
+                        statusDiv.innerText = result.success ? '✅ 錯題已記錄' : `❌ 記錄失敗: ${result.message}`;
+                    }
+                });
             }
             return html;
         }
@@ -206,25 +228,23 @@
         if (!sheetUrl) {
             loadingMessage.innerText = '❌ 錯誤：請在程式碼中填入您的「題庫」.csv 連結！';
         } else {
-            loadingMessage.style.display = 'block';
-            quizArea.style.display = 'none';
             Papa.parse(sheetUrl, {
                 download: true, header: true, skipEmptyLines: true,
-                complete: function(results) {
+                complete: (results) => {
                     allData = results.data.filter(row => row.id && row.id.trim() !== '');
                     if (allData.length > 0) {
                         loadingMessage.style.display = 'none';
                         questionPool = [...Array(allData.length).keys()].sort(() => 0.5 - Math.random());
                         displayQuestion();
                     } else {
-                         loadingMessage.style.display = 'none';
-                         statusMessage.innerText = '❌ 錯誤：讀取到的題庫是空的或格式不符。請檢查您的Google Sheet是否有內容，且欄位標題是否為 id, title, scenario, answer。';
-                         statusMessage.style.display = 'block';
+                        loadingMessage.style.display = 'none';
+                        statusMessage.innerText = '❌ 錯誤：讀取到的題庫是空的或格式不符。';
+                        statusMessage.style.display = 'block';
                     }
                 },
-                error: function(err) {
+                error: (err) => {
                     loadingMessage.style.display = 'none';
-                    statusMessage.innerText = '❌ 讀取題庫失敗！請檢查您的連結是否正確，以及發佈設定。';
+                    statusMessage.innerText = '❌ 讀取題庫失敗！請檢查您的連結與發佈設定。';
                     statusMessage.style.display = 'block';
                 }
             });
