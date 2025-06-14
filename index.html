@@ -65,8 +65,9 @@
         const sheetUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSt819mIxMjqR3L57o5RlmmXPuk99UOT_o3rBxVNFn9ecQUGavKRZRqnEfumK4hPA7CW9wi-kB_bMub/pub?gid=1432079927&single=true&output=csv";
         
         // ▼▼▼ 2. 請填入您在第二步中取得的「Apps Script 網頁應用程式網址」 ▼▼▼
-        const errorLogApiUrl = "";
+        const errorLogApiUrl = "YOUR_APPS_SCRIPT_API_URL"; // 請務必填上您的Apps Script API網址
         
+        // --- 以下為程式碼主體 ---
         let allData = [], questionPool = [], currentQuestion = {};
         let correct考點Indices = [], correct關鍵字Indices = [];
         const loadingMessage = document.getElementById('loading-message');
@@ -142,7 +143,8 @@
             quizArea.style.display = 'block';
         }
 
-        submitBtn.addEventListener('click', () => {
+        // *** 這裡是主要修正處 ***
+        submitBtn.addEventListener('click', async () => { // 加上 async
             document.querySelectorAll('.choices input[type="checkbox"]').forEach(checkbox => {
                 checkbox.disabled = true;
                 checkbox.parentElement.classList.add('disabled');
@@ -152,20 +154,23 @@
             const user關鍵字 = [...document.querySelectorAll('input[name="關鍵字"]:checked')].map(el => parseInt(el.value));
             
             let feedbackHTML = '<h3>結果分析</h3>';
-            feedbackHTML += grade(user考點, correct考點Indices, document.querySelectorAll('#choices-考點 span'), '考點');
-            feedbackHTML += grade(user關鍵字, correct關鍵字Indices, document.querySelectorAll('#choices-關鍵字 span'), '關鍵字');
+            
+            // 使用 await 等待 grade 函數完成
+            feedbackHTML += await grade(user考點, correct考點Indices, document.querySelectorAll('#choices-考點 span'), '考點');
+            feedbackHTML += await grade(user關鍵字, correct關鍵字Indices, document.querySelectorAll('#choices-關鍵字 span'), '關鍵字');
 
             feedbackArea.innerHTML = feedbackHTML;
             feedbackArea.style.display = 'block';
             submitBtn.style.display = 'none';
             nextBtn.style.display = 'block';
         });
-
+        
         async function logError(logData) {
-            if (!errorLogApiUrl) {
+            if (!errorLogApiUrl || errorLogApiUrl === "YOUR_APPS_SCRIPT_API_URL") {
                 return { success: false, message: 'API URL 未設定' };
             }
             try {
+                // 改為使用 'text/plain' 格式，以符合 Apps Script 簡單部署的 doPost 需求
                 const response = await fetch(errorLogApiUrl, {
                     method: 'POST',
                     mode: 'cors',
@@ -181,10 +186,13 @@
             }
         }
 
-        async function grade(userIndices, correctIndices, choiceElements, type) {
+        async function grade(userIndices, correctIndices, choiceElements, type) { // 加上 async
             let html = `<h4>${type}部分：</h4>`;
             const userSet = new Set(userIndices);
             const correctSet = new Set(correctIndices);
+            
+            const logStatusDiv = document.createElement('div');
+            logStatusDiv.className = 'log-status';
             
             if (userSet.size === correctSet.size && [...userSet].every(val => correctSet.has(val))) {
                 html += '<p class="feedback-item feedback-correct">✅ 完全正確！</p>';
@@ -196,7 +204,9 @@
                 if (correctlyChosen.length > 0) html += `<p class="feedback-item feedback-correct">答對部分: ${correctlyChosen.map(i => choiceElements[i].innerText).join(', ')}</p>`;
                 if (incorrectlyChosen.length > 0) html += `<p class="feedback-item feedback-wrong">答錯部分: ${incorrectlyChosen.map(i => choiceElements[i].innerText).join(', ')}</p>`;
                 if (missed.length > 0) html += `<p class="feedback-item feedback-missed">遺漏部分: ${missed.map(i => choiceElements[i].innerText).join(', ')}</p>`;
-
+                
+                logStatusDiv.innerText = '正在記錄錯題...';
+                
                 const logData = {
                     timestamp: new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }),
                     questionTitle: currentQuestion.title,
@@ -206,26 +216,17 @@
                     missedAnswer: missed.map(i => choiceElements[i].innerText).join('; ')
                 };
                 
-                const logStatusDiv = document.createElement('div');
-                logStatusDiv.className = 'log-status';
-                logStatusDiv.innerText = '正在記錄錯題...';
-                html += logStatusDiv.outerHTML;
-
-                // 非同步記錄錯誤
-                logError(logData).then(result => {
-                    const statusDiv = feedbackArea.querySelector('.log-status');
-                    if (statusDiv) {
-                        statusDiv.innerText = result.success ? '✅ 錯題已記錄' : `❌ 記錄失敗: ${result.message}`;
-                    }
-                });
+                const result = await logError(logData); // 使用 await 等待記錄完成
+                logStatusDiv.innerText = result.success ? '✅ 錯題已記錄' : `❌ 記錄失敗`;
             }
+            html += logStatusDiv.outerHTML;
             return html;
         }
 
         nextBtn.addEventListener('click', displayQuestion);
 
         // --- 主程式執行 ---
-        if (!sheetUrl) {
+        if (!sheetUrl || sheetUrl.includes("YOUR_GOOGLE_SHEET_LINK")) {
             loadingMessage.innerText = '❌ 錯誤：請在程式碼中填入您的「題庫」.csv 連結！';
         } else {
             Papa.parse(sheetUrl, {
